@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+langchain
+langchain-openai
+langchain-community
+sentence-transformers
+faiss-cpu
+pydantic
+pydantic-settings
+python-dotenv
+pandas
+openpyxl
+pymupdf
+python-multipart
