@@ -1,0 +1,81 @@
+flowchart LR
+    %% ─── Styling ───
+    classDef frontend fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#3730a3,rx:5,ry:5
+    classDef backend fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d,rx:5,ry:5
+    classDef service fill:#ccfbf1,stroke:#0d9488,stroke-width:2px,color:#115e59,rx:5,ry:5
+    classDef data fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#854d0e,rx:0,ry:0
+    classDef external fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,stroke-dasharray: 5 5,color:#1f2937,rx:10,ry:10
+
+    %% ─── Frontend Layer ───
+    subgraph FE [Frontend Next.js]
+        direction TB
+        UI([User Interface]):::frontend
+        API_Client[[API Client Lib]]:::frontend
+    end
+
+    %% ─── Backend API Layer ───
+    subgraph BE_API [Backend API Layer]
+        direction TB
+        Router(API Router):::backend
+    end
+
+    %% ─── Backend Core Services ───
+    subgraph BE_Svc [Backend Core Services]
+        direction TB
+        Ingest_Svc[Ingestion Service]:::service
+        RAG_Svc[RAG Service]:::service
+        Pheno_Svc[Phenotype Service]:::service
+    end
+
+    %% ─── Data Layer ───
+    subgraph Data [Data Persistence]
+        direction TB
+        MongoDB[(MongoDB)]:::data
+        FAISS[(FAISS Vector Store)]:::data
+        PDFs{{Local PDFs}}:::data
+    end
+
+    %% ─── External Layer ───
+    subgraph EXT [External APIs]
+        direction TB
+        CPIC((CPIC API)):::external
+        LLM((OpenRouter LLM)):::external
+        Unstruct((Unstructured.io)):::external
+    end
+
+    %% ─── Connections: Ingestion ───
+    UI -->|1. Ingest| API_Client
+    API_Client -.->|POST /ingest| Router
+    Router --> Ingest_Svc
+    Ingest_Svc -->|Check| MongoDB
+    Ingest_Svc -->|Fetch| PDFs
+    Ingest_Svc -->|Parse| Unstruct
+    Unstruct -.->|JSON| Ingest_Svc
+    Ingest_Svc -->|Store| MongoDB
+    Ingest_Svc -->|Embed| FAISS
+    Ingest_Svc -.->|Status OK| Router
+    Router -.->|Return JSON| API_Client
+    API_Client -.->|Update State| UI
+
+    %% ─── Connections: RAG Query ───
+    UI -->|2. Query| API_Client
+    API_Client -.->|POST /query| Router
+    Router --> RAG_Svc
+    RAG_Svc -->|Search| FAISS
+    RAG_Svc -->|Generate| LLM
+    LLM -.->|Answer Stream| RAG_Svc
+    RAG_Svc -.->|Response| Router
+    Router -.->|Return Answer| API_Client
+    API_Client -.->|Display Result| UI
+
+    %% ─── Connections: Phenotype ───
+    UI -->|3. Phenotype| API_Client
+    API_Client -.->|POST /phenotype| Router
+    Router --> Pheno_Svc
+    Pheno_Svc -->|Cache Check| MongoDB
+    Pheno_Svc -->|Live Lookup| CPIC
+    CPIC -.->|Result JSON| Pheno_Svc
+    Pheno_Svc -.->|Update Cache| MongoDB
+    Pheno_Svc -.->|Phenotype Data| Router
+    Router -.->|Return JSON| API_Client
+    API_Client -.->|Render Card| UI

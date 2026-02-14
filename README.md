@@ -128,3 +128,5 @@ A sophisticated Agency RAG (Retrieval-Augmented Generation) system for Pharmacog
    - Go to "Phenotype".
    - Select Gene and Diplotype (e.g., `CYP2C19 *2/*2`).
    - See the clinical phenotype, activity score, and recommendations.
+
+![Workflow Diagram](./mermaid-diagram-2026-02-14-232205.svg)
