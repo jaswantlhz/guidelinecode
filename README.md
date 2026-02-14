@@ -1,8 +1,8 @@
-# CPIC-RAG-Bot 🧬💊
+# CPIC-RAG
 
 A sophisticated Agency RAG (Retrieval-Augmented Generation) system for Pharmacogenomics. This tool automates the ingestion, parsing, and querying of CPIC (Clinical Pharmacogenetics Implementation Consortium) guidelines to provide evidence-based gene-drug interaction recommendations.
 
-## ✨ Features
+## Features
 
 - **Agentic Ingestion Pipeline**:
   - Automatically fetches CPIC guideline PDFs based on gene-drug pairs.
@@ -24,7 +24,7 @@ A sophisticated Agency RAG (Retrieval-Augmented Generation) system for Pharmacog
   - **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, Shadcn UI.
   - **Database**: MongoDB (Metadata/JSON storage) + FAISS (Vector Store).
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -90,7 +90,7 @@ A sophisticated Agency RAG (Retrieval-Augmented Generation) system for Pharmacog
 
 4. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 ├── agent/                  # Autonomous agent logic
@@ -112,7 +112,7 @@ A sophisticated Agency RAG (Retrieval-Augmented Generation) system for Pharmacog
     └── src/components/     # UI Components (Shadcn)
 ```
 
-## 🛠 Usage
+## Usage
 
 1. **Ingest a Guideline**:
    - Go to the "Ingest" tab.
@@ -128,6 +128,3 @@ A sophisticated Agency RAG (Retrieval-Augmented Generation) system for Pharmacog
    - Go to "Phenotype".
    - Select Gene and Diplotype (e.g., `CYP2C19 *2/*2`).
    - See the clinical phenotype, activity score, and recommendations.
-
-## 📄 License
-MIT
