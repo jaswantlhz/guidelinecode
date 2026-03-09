@@ -131,13 +131,13 @@ def get_available_genes() -> list[str]:
     """Get the list of genes available in the CPIC diplotype database."""
     try:
         resp = _session.get(
-            f"{CPIC_API_BASE}/diplotype",
-            params={"select": "genesymbol", "limit": "1000"},
+            f"{CPIC_API_BASE}/gene",
+            params={"select": "symbol", "limit": "1000"},
             timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
-        genes = sorted(set(row["genesymbol"] for row in data if row.get("genesymbol")))
+        genes = sorted(set(row["symbol"] for row in data if row.get("symbol")))
         return genes
     except Exception as e:
         logger.error(f"CPIC API error fetching genes: {e}")
@@ -152,3 +152,52 @@ def get_diplotypes_for_gene(gene: str) -> list[str]:
     rows = _get_diplotypes(gene)
     diplotypes = sorted(set(row["diplotype"] for row in rows if row.get("diplotype")))
     return diplotypes
+
+
+def get_available_drugs() -> list[str]:
+    """Get the list of drugs available in the CPIC database."""
+    try:
+        resp = _session.get(
+            f"{CPIC_API_BASE}/drug",
+            params={"select": "name", "limit": "1000"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        drugs = sorted(set(row["name"] for row in data if row.get("name")))
+        return drugs
+    except Exception as e:
+        logger.error(f"CPIC API error fetching drugs: {e}")
+        # Could implement caching here too if needed, similar to genes
+        return []
+
+
+def get_drugs_for_gene(gene: str) -> list[str]:
+    """Get the list of drugs that have CPIC pairs with the given gene."""
+    try:
+        # Fetch pairs for the gene, selecting embedded drug info
+        # Only include pairs that have an active guideline (guidelineid is not null)
+        resp = _session.get(
+            f"{CPIC_API_BASE}/pair",
+            params={
+                "genesymbol": f"eq.{gene}",
+                "guidelineid": "not.is.null",
+                "select": "drug(name)",
+                "limit": "1000"
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        
+        # Extract unique drug names
+        drugs = set()
+        for row in data:
+            d = row.get("drug")
+            if d and d.get("name"):
+                drugs.add(d["name"])
+                
+        return sorted(drugs)
+    except Exception as e:
+        logger.error(f"CPIC API error fetching drugs for gene {gene}: {e}")
+        return []

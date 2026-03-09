@@ -35,13 +35,21 @@ def parse_pdf_with_unstructured(pdf_path: str | Path) -> list[dict[str, Any]]:
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
+
     api_key = settings.UNSTRUCTURED_API_KEY
-    if not api_key:
-        raise ValueError("UNSTRUCTURED_API_KEY is not set in environment.")
+    is_valid_key = api_key and api_key != "your_unstructured_api_key_here"
 
-    logger.info(f"Submitting '{pdf_path.name}' to Unstructured.io API...")
+    if is_valid_key:
+        logger.info(f"Submitting '{pdf_path.name}' to Unstructured.io Platform API...")
+        return _parse_with_platform_api(pdf_path, api_key)
+    else:
+        logger.info(f"Using Legacy/Community Endpoint for '{pdf_path.name}'...")
+        return _parse_with_legacy_api(pdf_path)
 
-    with UnstructuredClient(api_key_auth=api_key) as client:
+
+def _parse_with_platform_api(pdf_path: Path, api_key: str) -> list[dict[str, Any]]:
+    """Submit to Unstructured Platform (Async Jobs) API."""
+    with UnstructuredClient(api_key_auth=api_key, server_url=settings.UNSTRUCTURED_URL) as client:
         # Step 1: Create the on-demand job
         with open(pdf_path, "rb") as f:
             input_file = InputFiles(
@@ -96,3 +104,28 @@ def parse_pdf_with_unstructured(pdf_path: str | Path) -> list[dict[str, Any]]:
 
         logger.info(f"Parsed {len(all_elements)} elements from '{pdf_path.name}'")
         return all_elements
+
+
+def _parse_with_legacy_api(pdf_path: Path) -> list[dict[str, Any]]:
+    """Use the standard/legacy Unstructured API (synchronous)."""
+    url = settings.UNSTRUCTURED_LEGACY_URL
+    if not url:
+        raise ValueError("UNSTRUCTURED_LEGACY_URL is not set.")
+
+    # Simple multipart/form-data upload using standard library to avoid 'requests' dependency if not present
+    # However, constructing multipart manually is error-prone.
+    # Given 'langchain' is installed, 'requests' is almost certainly available.
+    # I will try to import requests, if fails, raise error (since langchain needs it anyway).
+    try:
+        import requests
+    except ImportError:
+        raise ImportError("The 'requests' library is required for the legacy API. Please install it.")
+
+    with open(pdf_path, "rb") as f:
+        files = {"files": (pdf_path.name, f, "application/pdf")}
+        response = requests.post(url, files=files)
+
+    if response.status_code != 200:
+        raise RuntimeError(f"Unstructured Legacy API failed: {response.status_code} {response.text}")
+
+    return response.json()

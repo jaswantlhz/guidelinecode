@@ -82,7 +82,7 @@ export default function PhenotypePage() {
                 <h1 className="text-3xl font-bold">
                     <span className="gradient-text">Phenotype Resolution</span>
                 </h1>
-                <p className="black">
+                <p className="text-muted-foreground">
                     Resolve genotypes to clinical phenotypes and dosing recommendations using CPIC activity scores.
                 </p>
             </section>
@@ -114,7 +114,7 @@ export default function PhenotypePage() {
                                     ))}
                                 </datalist>
                                 {genes.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
+                                    <div className="flex flex-wrap gap-1 mt-1 max-h-40 overflow-y-auto p-2 border rounded-md bg-background/30">
                                         {genes.map((g) => (
                                             <button
                                                 key={g}
@@ -148,7 +148,7 @@ export default function PhenotypePage() {
                                     ))}
                                 </datalist>
                                 {diplotypes.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
+                                    <div className="flex flex-wrap gap-1 mt-1 max-h-60 overflow-y-auto p-2 border rounded-md bg-background/30">
                                         {diplotypes.map((d) => (
                                             <button
                                                 key={d}

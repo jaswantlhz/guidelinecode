@@ -11,6 +11,7 @@ from langchain_core.prompts import PromptTemplate
 
 from config import settings
 from services.embeddings import get_vectorstore
+import mlflow
 
 SYSTEM_PROMPT = """You are a clinical pharmacogenomics expert. Answer the
 question using ONLY the provided guideline excerpts. If the information
@@ -46,13 +47,24 @@ def _get_llm() -> ChatOpenAI:
         max_tokens=settings.LLM_MAX_TOKENS,
         api_key=settings.OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
+        default_headers={
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "CPIC RAG",
+        },
     )
     return _llm
 
 
 def query_rag(gene: str, drug: str, question: str) -> dict:
     """Run RAG query with actual similarity scores and computed confidence."""
-    vs = get_vectorstore()
+    
+    # Enable MLflow tracking for queries
+    with mlflow.start_run(run_name=f"rag_query_{gene}_{drug}"):
+        mlflow.log_param("gene", gene)
+        mlflow.log_param("drug", drug)
+        mlflow.log_param("question", question)
+        
+        vs = get_vectorstore()
     if vs is None:
         return {
             "answer": "No guidelines have been indexed yet. Please ingest a guideline first.",
@@ -102,19 +114,65 @@ def query_rag(gene: str, drug: str, question: str) -> dict:
     # Scale to a more intuitive 0-1 range (scores typically ~0.3-0.8)
     confidence = min(1.0, avg_score * 1.2)
 
-    # ── Step 4: Call LLM ──
     prompt = PromptTemplate(
         template=SYSTEM_PROMPT,
         input_variables=["context", "question"],
     )
-    llm = _get_llm()
     formatted = prompt.format(context=context, question=full_question)
-    response = llm.invoke(formatted)
-    answer = response.content if hasattr(response, "content") else str(response)
+
+    # ── Step 4: Call LLM with Fallback ──
+    models_to_try = [settings.LLM_MODEL] + settings.LLM_FALLBACKS
+    final_answer = ""
+    used_model = "none"
+    last_error = None
+
+    import time
+    from langchain_core.messages import HumanMessage
+
+    for model_name in models_to_try:
+        try:
+            print(f"Trying LLM model: {model_name}...")
+            # Create a localized LLM instance for this attempt
+            llm = ChatOpenAI(
+                model=model_name,
+                temperature=settings.LLM_TEMPERATURE,
+                max_tokens=settings.LLM_MAX_TOKENS,
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "http://localhost:3000",
+                    "X-Title": "CPIC RAG",
+                },
+            )
+            
+            response = llm.invoke(formatted)
+            final_answer = response.content if hasattr(response, "content") else str(response)
+            used_model = model_name
+            print(f"Success with model: {model_name}")
+            break
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Failed with model {model_name}: {error_msg}")
+            last_error = e
+            # If 429 (rate limit), maybe sleep briefly? 
+            # But better to just move to next model immediately for speed.
+        continue
+
+    if not final_answer and last_error:
+        # particular case: if all failed, return a friendly message instead of crashing
+        final_answer = f"I'm sorry, I tried {len(models_to_try)} different AI models but they are all currently overloaded or unavailable (Free Tier limitations). Please try again in 1 minute. Last error: {str(last_error)}"
+        confidence = 0.0
+
+    # Log final metrics and params to MLflow
+    mlflow.log_param("used_model", used_model)
+    mlflow.log_metric("confidence", round(confidence, 2))
+    mlflow.log_metric("retrieved_sources_count", len(sources))
+    if sources:
+        mlflow.log_metric("top_source_score", sources[0].get("score", 0))
 
     return {
-        "answer": answer,
+        "answer": final_answer,
         "sources": sources,
         "confidence": round(confidence, 2),
-        "model_used": settings.LLM_MODEL,
+        "model_used": used_model,
     }

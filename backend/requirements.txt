@@ -8,6 +8,8 @@ faiss-cpu
 pydantic
 pydantic-settings
 python-dotenv
+zenml
+mlflow
 pandas
 openpyxl
 pymupdf

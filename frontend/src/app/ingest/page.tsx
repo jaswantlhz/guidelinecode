@@ -17,11 +17,26 @@ export default function IngestPage() {
     const [error, setError] = useState("");
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [polling, setPolling] = useState(false);
+    const [genes, setGenes] = useState<string[]>([]);
+    const [drugs, setDrugs] = useState<string[]>([]);
 
-    // Fetch pipeline status on mount
+    // Fetch pipeline status and available options on mount
     useEffect(() => {
         api.status().then(setStatus).catch(() => { });
+        api.genes().then((d) => setGenes(d.genes)).catch(() => { });
     }, []);
+
+    // Update drug list when gene changes
+    useEffect(() => {
+        // Only filter if the entered gene is a valid known gene
+        // Otherwise keep showing all drugs (or if empty)
+        const isValidGene = genes.includes(gene);
+        const query = isValidGene ? gene : undefined;
+
+        api.drugs(query).then((d) => setDrugs(d.drugs)).catch(() => { });
+    }, [gene, genes]);
+
+
 
     // Poll ingestion status
     useEffect(() => {
@@ -79,7 +94,7 @@ export default function IngestPage() {
                 <h1 className="text-3xl font-bold">
                     <span className="gradient-text">Guideline Ingestion</span>
                 </h1>
-                <p className="text-black">
+                <p className="text-muted-foreground">
                     Fetch, parse, and index CPIC guideline PDFs into the vector database for RAG-powered Q&A.
                 </p>
             </section>
@@ -127,7 +142,30 @@ export default function IngestPage() {
                                     onChange={(e) => setGene(e.target.value)}
                                     className="bg-background/50 border-border/50 focus:border-primary transition-colors"
                                     required
+                                    list="ingest-gene-list"
                                 />
+                                <datalist id="ingest-gene-list">
+                                    {genes.map((g) => (
+                                        <option key={g} value={g} />
+                                    ))}
+                                </datalist>
+                                {genes.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1 max-h-40 overflow-y-auto p-2 border rounded-md bg-background/30">
+                                        {genes.map((g) => (
+                                            <button
+                                                key={g}
+                                                type="button"
+                                                onClick={() => setGene(g)}
+                                                className={`text-xs px-2 py-0.5 rounded-md border transition-colors cursor-pointer ${gene === g
+                                                    ? "bg-primary/20 text-primary border-primary/30"
+                                                    : "bg-muted/30 text-muted-foreground border-border/30 hover:bg-primary/10"
+                                                    }`}
+                                            >
+                                                {g}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="ingest-drug">Drug Name</Label>
@@ -138,7 +176,30 @@ export default function IngestPage() {
                                     onChange={(e) => setDrug(e.target.value)}
                                     className="bg-background/50 border-border/50 focus:border-primary transition-colors"
                                     required
+                                    list="ingest-drug-list"
                                 />
+                                <datalist id="ingest-drug-list">
+                                    {drugs.map((d) => (
+                                        <option key={d} value={d} />
+                                    ))}
+                                </datalist>
+                                {drugs.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1 max-h-40 overflow-y-auto p-2 border rounded-md bg-background/30">
+                                        {drugs.map((d) => (
+                                            <button
+                                                key={d}
+                                                type="button"
+                                                onClick={() => setDrug(d)}
+                                                className={`text-xs px-2 py-0.5 rounded-md border transition-colors cursor-pointer ${drug === d
+                                                    ? "bg-primary/20 text-primary border-primary/30"
+                                                    : "bg-muted/30 text-muted-foreground border-border/30 hover:bg-primary/10"
+                                                    }`}
+                                            >
+                                                {d}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
 

@@ -55,7 +55,7 @@ export default function QueryPage() {
                     <span className="gradient-text">Pharmacogenomics</span>{" "}
                     <span className="text-foreground">Intelligence</span>
                 </h1>
-                <p className="text-black text-lg max-w-2xl mx-auto">
+                <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
                     Ask clinical questions about CPIC guidelines. Our RAG-powered AI retrieves
                     relevant guideline sections and generates evidence-based answers.
                 </p>
@@ -184,7 +184,7 @@ export default function QueryPage() {
                                                         Page {src.page}
                                                     </Badge>
                                                 )}
-                                                {src.score !== null && (
+                                                {src.score !== undefined && src.score !== null && (
                                                     <span className="text-xs text-muted-foreground ml-auto">
                                                         Score: {src.score.toFixed(3)}
                                                     </span>
