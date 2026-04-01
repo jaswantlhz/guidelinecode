@@ -16,23 +16,22 @@ async def post_query(req: QueryRequest):
             question=req.question,
         )
 
-        # Map sources to the Source schema
         sources = []
         for src in result.get("sources", []):
             sources.append(Source(
                 title=src.get("title", ""),
                 section=src.get("section"),
                 page=src.get("page", 0),
-                text=src.get("snippet", src.get("text", "")),
-                snippet=src.get("snippet", ""),
+                text=src.get("text", ""),
                 score=src.get("score", 0.0),
+                pmid=src.get("pmid"),
             ))
 
         return QueryResponse(
             answer=result.get("answer", ""),
-            confidence=result.get("confidence", 0.7),
             model_used=result.get("model_used", "openrouter"),
             sources=sources,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

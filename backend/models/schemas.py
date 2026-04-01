@@ -14,13 +14,12 @@ class Source(BaseModel):
     section: Optional[str] = None
     page: Optional[int] = 0
     text: str = ""
-    snippet: Optional[str] = ""
     score: float = 0.0
+    pmid: Optional[str] = None  # Set if source is from PubMed
 
 
 class QueryResponse(BaseModel):
     answer: str
-    confidence: float = 0.0
     model_used: str = "openrouter"
     sources: list[Source] = []
 

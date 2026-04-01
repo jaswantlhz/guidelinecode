@@ -1,20 +1,32 @@
-"""RAG service — LangChain chain for pharmacogenomics Q&A.
+"""RAG service — Pharmacogenomics Q&A with ChromaDB + Reranker.
 
-Uses FAISS similarity_search_with_score directly so we get actual
-relevance scores, then feeds the results to the LLM for answering.
+Pipeline:
+1. ChromaDB retrieves top-20 candidates with STRICT gene+drug metadata filter
+2. Cross-encoder reranker scores top-20, returns top-5 by true relevance
+3. Top-5 chunks are sent to LLM with structured clinical prompt
+
+REMOVED:
+- Fake confidence score (was 1/(1+d) * 1.2 — completely dishonest)
+- Duplicate snippet/text fields in sources
 """
 
 from __future__ import annotations
+
+import logging
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
 from config import settings
-from services.embeddings import get_vectorstore
+from services.embeddings import similarity_search_with_filter
+from services.reranker import rerank
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a clinical pharmacogenomics expert. Answer the
-question using ONLY the provided guideline excerpts. If the information
-is not in the context, say so clearly. Always cite the guideline source.
+question using ONLY the provided guideline excerpts and PubMed abstracts.
+If the information is not in the context, say so clearly. Always cite the
+guideline source or PMID where applicable.
 
 Be precise about dosing recommendations, gene-drug interactions,
 phenotype classifications, and activity scores.
@@ -35,7 +47,7 @@ _llm = None
 
 
 def _get_llm() -> ChatOpenAI:
-    """Get LLM configured for OpenRouter or direct OpenAI."""
+    """Get LLM — prefers OpenRouter but configurable."""
     global _llm
     if _llm is not None:
         return _llm
@@ -51,56 +63,55 @@ def _get_llm() -> ChatOpenAI:
 
 
 def query_rag(gene: str, drug: str, question: str) -> dict:
-    """Run RAG query with actual similarity scores and computed confidence."""
-    vs = get_vectorstore()
-    if vs is None:
-        return {
-            "answer": "No guidelines have been indexed yet. Please ingest a guideline first.",
-            "sources": [],
-            "confidence": 0.0,
-            "model_used": "none",
-        }
+    """
+    Run RAG query with metadata-filtered retrieval and cross-encoder reranking.
 
-    # ── Step 1: Retrieve documents WITH scores ──
+    Steps:
+      1. ChromaDB: retrieve top-20 chunks filtered to gene+drug
+      2. Reranker: re-score and return top-5 by actual relevance
+      3. LLM: generate answer from top-5 chunks
+    """
     full_question = f"Gene: {gene}, Drug: {drug}. {question}"
-    docs_and_scores = vs.similarity_search_with_score(full_question, k=5)
 
-    if not docs_and_scores:
+    # ── Step 1: Metadata-filtered retrieval from ChromaDB ──
+    candidates = similarity_search_with_filter(
+        query=full_question,
+        gene=gene,
+        drug=drug,
+        k=20,  # retrieve 20, then rerank to 5
+    )
+
+    if not candidates:
         return {
-            "answer": "No relevant guideline sections found for your query.",
+            "answer": "No relevant guideline sections found for your query. "
+                      "Please ingest the guideline for this gene-drug pair first.",
             "sources": [],
-            "confidence": 0.0,
             "model_used": settings.LLM_MODEL,
         }
 
-    # ── Step 2: Build context from retrieved docs ──
+    # ── Step 2: Cross-encoder reranking ──
+    top_results = rerank(query=full_question, docs_and_scores=candidates, top_n=5)
+
+    # ── Step 3: Build context and source list ──
     context_parts = []
     sources = []
-    raw_scores = []
 
-    for doc, score in docs_and_scores:
-        # FAISS returns L2 distance — lower = more similar
-        # Convert to a 0-1 similarity: sim = 1 / (1 + distance)
-        similarity = 1.0 / (1.0 + float(score))
-        raw_scores.append(similarity)
-
+    for doc, score in top_results:
         context_parts.append(doc.page_content)
-        sources.append({
+        source_record = {
             "title": doc.metadata.get("title", "Unknown"),
             "page": doc.metadata.get("page", 0),
             "section": doc.metadata.get("element_type", None),
-            "snippet": doc.page_content[:300],
             "text": doc.page_content[:300],
-            "score": round(similarity, 3),
-        })
+            "score": score,
+        }
+        # Include PMID if this chunk came from PubMed
+        if doc.metadata.get("source") == "pubmed":
+            source_record["pmid"] = doc.metadata.get("pmid", "")
+            source_record["title"] = f"[PubMed] {source_record['title']}"
+        sources.append(source_record)
 
     context = "\n\n---\n\n".join(context_parts)
-
-    # ── Step 3: Compute confidence from scores ──
-    # Average of top-k similarity scores
-    avg_score = sum(raw_scores) / len(raw_scores) if raw_scores else 0.0
-    # Scale to a more intuitive 0-1 range (scores typically ~0.3-0.8)
-    confidence = min(1.0, avg_score * 1.2)
 
     # ── Step 4: Call LLM ──
     prompt = PromptTemplate(
@@ -115,6 +126,5 @@ def query_rag(gene: str, drug: str, question: str) -> dict:
     return {
         "answer": answer,
         "sources": sources,
-        "confidence": round(confidence, 2),
         "model_used": settings.LLM_MODEL,
     }

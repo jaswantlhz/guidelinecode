@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     UNSTRUCTURED_API_KEY: str = os.getenv("UNSTRUCTURED_API", "")
     UNSTRUCTURED_URL: str = os.getenv("UNSTRUCTURED_URL", "https://platform.unstructuredapp.io/api/v1")
 
+    # PubMed / NCBI Entrez (required by NCBI for API access)
+    ENTREZ_EMAIL: str = os.getenv("ENTREZ_EMAIL", "")
+    ENTREZ_API_KEY: str = os.getenv("ENTREZ_API_KEY", "")  # optional — raises rate limit from 3→10 req/s
+
     # MongoDB
     MONGODB_URI: str = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
     MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "cpic_rag")
@@ -22,15 +26,15 @@ class Settings(BaseSettings):
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
     DATA_DIR: Path = BASE_DIR / "data"
-    FAISS_INDEX_DIR: Path = DATA_DIR / "faiss_index"
+    CHROMA_DIR: Path = DATA_DIR / "chroma_db"      # ChromaDB replaces FAISS index
     PHENOTYPE_CSV: Path = DATA_DIR / "phenotype_table.csv"
     PDF_DIR: Path = BASE_DIR / "pdfs"
 
-    # Embedding model
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    # Embedding model — PubMedBERT (domain-specific, replaces all-MiniLM-L6-v2)
+    EMBEDDING_MODEL: str = "pritamdeka/S-PubMedBert-MS-MARCO"
 
-    # LLM
-    LLM_MODEL: str = "openai/gpt-oss-20b:free"
+    # LLM — upgraded to gpt-4o-mini (cheap, reliable, high quality)
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 4096
 
@@ -43,5 +47,5 @@ settings = Settings()
 
 # Ensure directories exist
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
-settings.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+settings.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 settings.PDF_DIR.mkdir(parents=True, exist_ok=True)
