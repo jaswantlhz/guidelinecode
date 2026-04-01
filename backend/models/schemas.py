@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 # ─── Query ─────────────────────────────────────────────────
@@ -18,10 +18,19 @@ class Source(BaseModel):
     pmid: Optional[str] = None  # Set if source is from PubMed
 
 
+class RagasMetrics(BaseModel):
+    """Proxy RAGAS-style metrics computed from retrieval & generation pipeline."""
+    context_precision: float = 0.0   # Average reranker score of top-K sources
+    faithfulness: float = 0.0        # Ratio of answer tokens grounded in sources
+    answer_relevancy: float = 0.0    # Proxy: answer density relative to context
+    source_count: int = 0            # Number of sources used
+
+
 class QueryResponse(BaseModel):
     answer: str
     model_used: str = "openrouter"
-    sources: list[Source] = []
+    sources: List[Source] = []
+    metrics: Optional[RagasMetrics] = None
 
 
 # ─── Ingest ────────────────────────────────────────────────

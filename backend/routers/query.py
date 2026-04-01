@@ -1,7 +1,7 @@
 """Query router — RAG-powered Q&A endpoint."""
 
 from fastapi import APIRouter, HTTPException
-from models.schemas import QueryRequest, QueryResponse, Source
+from models.schemas import QueryRequest, QueryResponse, Source, RagasMetrics
 from services.rag import query_rag
 
 router = APIRouter(prefix="/api", tags=["query"])
@@ -27,10 +27,14 @@ async def post_query(req: QueryRequest):
                 pmid=src.get("pmid"),
             ))
 
+        metrics_data = result.get("metrics")
+        metrics = RagasMetrics(**metrics_data) if metrics_data else None
+
         return QueryResponse(
             answer=result.get("answer", ""),
             model_used=result.get("model_used", "openrouter"),
             sources=sources,
+            metrics=metrics,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

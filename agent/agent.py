@@ -10,7 +10,7 @@ load_dotenv()
 openrouter_key = os.getenv("OPENROUTER_API_KEY")
 
 model = ChatOpenAI(
-    model="openai/gpt-oss-20b:free",
+    model="stepfun/step-3.5-flash:free",
     temperature=0.1,
     max_tokens=30000,
     timeout=300,

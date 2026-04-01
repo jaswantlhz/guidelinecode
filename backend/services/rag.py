@@ -13,7 +13,11 @@ REMOVED:
 from __future__ import annotations
 
 import logging
+import math
+import re
+from typing import List, Tuple
 
+from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
@@ -123,8 +127,36 @@ def query_rag(gene: str, drug: str, question: str) -> dict:
     response = llm.invoke(formatted)
     answer = response.content if hasattr(response, "content") else str(response)
 
+    # ── Step 5: Compute RAGAS-style proxy metrics ──
+    reranker_scores = [s for _, s in top_results]
+    context_precision = round(sum(reranker_scores) / len(reranker_scores), 4) if reranker_scores else 0.0
+
+    # Faithfulness: what fraction of unique answer tokens appear in any source chunk
+    def _tokens(text: str) -> set:
+        return set(re.findall(r"\b[a-z]{4,}\b", text.lower()))
+
+    answer_tokens = _tokens(answer)
+    context_tokens: set = set()
+    for part in context_parts:
+        context_tokens |= _tokens(part)
+    faithfulness = round(len(answer_tokens & context_tokens) / max(len(answer_tokens), 1), 4)
+    faithfulness = min(faithfulness, 1.0)
+
+    # Answer relevancy proxy: logistic of (answer_len / max_context_len)
+    answer_len = len(answer.split())
+    context_len = sum(len(p.split()) for p in context_parts)
+    relevancy_ratio = answer_len / max(context_len, 1)
+    answer_relevancy = round(1.0 / (1.0 + math.exp(-6 * (relevancy_ratio - 0.3))), 4)
+    answer_relevancy = min(answer_relevancy, 1.0)
+
     return {
         "answer": answer,
         "sources": sources,
         "model_used": settings.LLM_MODEL,
+        "metrics": {
+            "context_precision": context_precision,
+            "faithfulness": faithfulness,
+            "answer_relevancy": answer_relevancy,
+            "source_count": len(top_results),
+        },
     }
