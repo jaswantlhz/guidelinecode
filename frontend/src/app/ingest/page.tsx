@@ -53,12 +53,13 @@ export default function IngestPage() {
         }).catch(err => console.error("Failed to load options", err));
     }, []);
 
-    // Poll ingestion status
+    // Poll ingestion job status by job_id (more accurate than gene/drug polling)
     useEffect(() => {
-        if (!polling || !gene || !drug) return;
+        if (!polling || !result?.job_id) return;
+        const jobId = result.job_id;
         const interval = setInterval(async () => {
             try {
-                const s = await api.ingestStatus(gene, drug);
+                const s = await api.ingestJob(jobId);
                 setResult(s);
                 if (s.status === "completed" || s.status === "failed") {
                     setPolling(false);
@@ -70,7 +71,7 @@ export default function IngestPage() {
             }
         }, 3000);
         return () => clearInterval(interval);
-    }, [polling, gene, drug]);
+    }, [polling, result?.job_id]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

@@ -3,12 +3,14 @@ uvicorn[standard]
 langchain
 langchain-openai
 langchain-community
+langchain-chroma
 sentence-transformers
-faiss-cpu
+chromadb
 pydantic
 pydantic-settings
 python-dotenv
 pandas
 openpyxl
-pymupdf
 python-multipart
+unstructured-client
+biopython
