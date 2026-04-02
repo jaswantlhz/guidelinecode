@@ -43,7 +43,7 @@ def get_reranker():
 def rerank(
     query: str,
     docs_and_scores: List[tuple[Document, float]],
-    top_n: int = 5,
+    top_n: int = 3,
 ) -> List[tuple[Document, float]]:
     """
     Re-rank retrieved documents using a cross-encoder.
