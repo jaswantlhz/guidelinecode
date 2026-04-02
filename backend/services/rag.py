@@ -98,7 +98,7 @@ def query_rag(gene: str, drug: str, question: str) -> dict:
         }
 
     # ── Step 2: Cross-encoder reranking ──
-    top_results = rerank(query=full_question, docs_and_scores=candidates, top_n=5)
+    top_results = rerank(query=full_question, docs_and_scores=candidates, top_n=3)
 
     # ── Step 3: Build context and source list ──
     context_parts = []
