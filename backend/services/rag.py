@@ -27,39 +27,43 @@ from services.reranker import rerank
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a clinical pharmacogenomics expert. Answer the
-question using ONLY the provided guideline excerpts and PubMed abstracts.
-If the information is not in the context, say so clearly. Always cite the
-guideline source or PMID where applicable.
+SYSTEM_PROMPT = """You are a domain expert in clinical pharmacogenomics.
+- Use the context as the primary source.
+- If the answer is partially available, answer using available information.
+- Only say "Not found in context" if nothing relevant exists.
+- If only partial information is available, provide the best possible answer and mention limitations.
+- Cite the relevant parts of the context by referencing the [Source X].
 
-Be precise about dosing recommendations, gene-drug interactions,
-phenotype classifications, and activity scores.
+Return your response in the following strict structure:
 
-When the data supports it, format your answer with:
-- A summary table (using markdown table syntax) for phenotype-based recommendations
-- Key points as a numbered or bulleted list
-- Bold (**text**) for critical values like dose adjustments
+### 1. Direct Answer
+Start with a direct answer in 1 sentence. Then expand briefly with any necessary explanation, tables, or itemized lists.
+
+### 2. Supporting Evidence
+Provide supporting evidence (quotes) when clearly available, referencing the metadata source tags.
+
+### 3. Confidence Level
+State your confidence as a score from 0.0 to 1.0 (e.g., 0.95), based strictly on how completely the provided context answers the question.
 
 Context:
 {context}
 
-Question: {question}
-
-Answer:"""
+Question: {question}"""
 
 _llm = None
 
 
 def _get_llm() -> ChatOpenAI:
-    """Get LLM — prefers OpenRouter but configurable."""
+    """Get LLM — tuned for strict factual RAG groundedness."""
     global _llm
     if _llm is not None:
         return _llm
 
     _llm = ChatOpenAI(
         model=settings.LLM_MODEL,
-        temperature=settings.LLM_TEMPERATURE,
-        max_tokens=settings.LLM_MAX_TOKENS,
+        temperature=0.0,    # 0.0 for zero hallucination
+        top_p=0.9,          # slightly constrained sampling
+        max_tokens=800,     # avoid rambling
         api_key=settings.OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
     )
@@ -100,19 +104,26 @@ def query_rag(gene: str, drug: str, question: str) -> dict:
     context_parts = []
     sources = []
 
-    for doc, score in top_results:
-        context_parts.append(doc.page_content)
+    for i, (doc, score) in enumerate(top_results, 1):
+        source_title = doc.metadata.get("title", "Unknown")
+        elem_type = doc.metadata.get("element_type", "Text")
+        
+        # Build a highly structured context chunk to improve LLM reasoning
+        origin = "PubMed Abstract" if doc.metadata.get("source") == "pubmed" else "CPIC Guidelines"
+        context_chunk = f"[Source {i}: {origin} | File: {source_title} | Type: {elem_type}]\n{doc.page_content}"
+        context_parts.append(context_chunk)
+        
         source_record = {
-            "title": doc.metadata.get("title", "Unknown"),
+            "title": source_title,
             "page": doc.metadata.get("page", 0),
-            "section": doc.metadata.get("element_type", None),
+            "section": elem_type,
             "text": doc.page_content[:300],
             "score": score,
         }
         # Include PMID if this chunk came from PubMed
         if doc.metadata.get("source") == "pubmed":
             source_record["pmid"] = doc.metadata.get("pmid", "")
-            source_record["title"] = f"[PubMed] {source_record['title']}"
+            source_record["title"] = f"[PubMed] {source_title}"
         sources.append(source_record)
 
     context = "\n\n---\n\n".join(context_parts)

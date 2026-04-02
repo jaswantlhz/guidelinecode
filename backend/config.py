@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "pritamdeka/S-PubMedBert-MS-MARCO"
 
     # LLM — upgraded to gpt-4o-mini (cheap, reliable, high quality)
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-oss-20b:free")
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 4096
 
