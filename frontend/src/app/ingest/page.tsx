@@ -1,13 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api, type IngestResponse, type StatusResponse } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Info } from "lucide-react";
+import { Info, CheckCircle2, XCircle, Loader2, ChevronRight } from "lucide-react";
+
+// Pipeline steps matching the backend _STEPS list
+const PIPELINE_STEPS = [
+    "Checking existing index",
+    "Locating guideline PDF",
+    "Downloading PDF",
+    "Parsing with Unstructured.io",
+    "Fetching PubMed abstracts",
+    "Storing in MongoDB",
+    "Embedding in ChromaDB",
+];
 
 export default function IngestPage() {
     const [gene, setGene] = useState("");
@@ -22,11 +33,13 @@ export default function IngestPage() {
     const [availableDrugs, setAvailableDrugs] = useState<string[]>([]);
     const [geneDrugPairs, setGeneDrugPairs] = useState<{ Gene: string; Drug: string }[]>([]);
 
+    // Track elapsed time during ingestion
+    const [elapsed, setElapsed] = useState(0);
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+
     // Filter logic
     const filteredGenes = availableGenes.filter(g => {
-        // 1. Text search
         if (!g.toLowerCase().includes(gene.toLowerCase())) return false;
-        // 2. Filter by selected drug (if it's a valid exact match)
         if (drug && availableDrugs.includes(drug)) {
             return geneDrugPairs.some(p => p.Drug === drug && p.Gene === g);
         }
@@ -34,9 +47,7 @@ export default function IngestPage() {
     });
 
     const filteredDrugs = availableDrugs.filter(d => {
-        // 1. Text search
         if (!d.toLowerCase().includes(drug.toLowerCase())) return false;
-        // 2. Filter by selected gene (if it's a valid exact match)
         if (gene && availableGenes.includes(gene)) {
             return geneDrugPairs.some(p => p.Gene === gene && p.Drug === d);
         }
@@ -53,7 +64,18 @@ export default function IngestPage() {
         }).catch(err => console.error("Failed to load options", err));
     }, []);
 
-    // Poll ingestion job status by job_id (more accurate than gene/drug polling)
+    // Start / stop elapsed timer
+    useEffect(() => {
+        if (loading) {
+            setElapsed(0);
+            timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
+        } else {
+            if (timerRef.current) clearInterval(timerRef.current);
+        }
+        return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    }, [loading]);
+
+    // Poll ingestion job status by job_id
     useEffect(() => {
         if (!polling || !result?.job_id) return;
         const jobId = result.job_id;
@@ -64,12 +86,13 @@ export default function IngestPage() {
                 if (s.status === "completed" || s.status === "failed") {
                     setPolling(false);
                     setLoading(false);
+                    // Refresh stats card
                     api.status().then(setStatus).catch(() => { });
                 }
             } catch {
-                // ignore polling errors
+                // ignore transient polling errors
             }
-        }, 3000);
+        }, 2000);
         return () => clearInterval(interval);
     }, [polling, result?.job_id]);
 
@@ -83,7 +106,7 @@ export default function IngestPage() {
         try {
             const res = await api.ingest({ gene, drug });
             setResult(res);
-            if (res.status === "pending" || res.status === "fetching_pdf") {
+            if (res.status === "pending" || res.status === "running") {
                 setPolling(true);
             } else {
                 setLoading(false);
@@ -94,14 +117,26 @@ export default function IngestPage() {
         }
     };
 
+    // Derived progress values
+    const stepIndex = result?.step_index ?? 0;
+    const totalSteps = result?.total_steps ?? PIPELINE_STEPS.length;
+    const progressPct = result?.status === "completed"
+        ? 100
+        : Math.round((stepIndex / totalSteps) * 100);
+
     const statusColor = (s: string) => {
         switch (s) {
-            case "completed": return "bg-green-500/20 text-green-400 border-green-500/30";
-            case "failed": return "bg-red-500/20 text-red-400 border-red-500/30";
-            case "pending": return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
-            default: return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+            case "completed": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+            case "failed":    return "bg-red-500/20 text-red-400 border-red-500/30";
+            case "running":   return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+            case "pending":   return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+            default:          return "bg-muted/30 text-muted-foreground border-border/30";
         }
     };
+
+    const isActive = loading || polling;
+    const isDone   = result?.status === "completed";
+    const isFailed = result?.status === "failed";
 
     return (
         <div className="space-y-8">
@@ -110,8 +145,8 @@ export default function IngestPage() {
                 <h1 className="text-3xl font-bold">
                     <span className="gradient-text">Guideline Ingestion</span>
                 </h1>
-                <p className=" black ">
-                    Fetch, parse, and index CPIC guideline PDFs into the vector database for RAG-powered Q&A.
+                <p className="text-muted-foreground">
+                    Fetch, parse, and index CPIC guideline PDFs into the vector database for RAG-powered Q&amp;A.
                 </p>
             </section>
 
@@ -119,20 +154,15 @@ export default function IngestPage() {
             {status && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
-                        { label: "Status", value: status.status === "ok" ? "Online" : "Offline" },
+                        { label: "Status",     value: status.status === "ok" ? "Online" : "Offline" },
                         { label: "Guidelines", value: status.indexed_guidelines.toString() },
-                        { label: "Chunks", value: status.total_chunks.toString() },
-                        { label: "Embeddings", value: status.embedding_model },
+                        { label: "Chunks",     value: status.total_chunks.toString() },
+                        { label: "Model",      value: status.embedding_model },
                     ].map((s, i) => (
                         <Card key={i} className="glass border-border/40">
                             <CardContent className="pt-4 pb-4">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xl"></span>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">{s.label}</p>
-                                        <p className="font-semibold text-sm">{s.value}</p>
-                                    </div>
-                                </div>
+                                <p className="text-xs text-muted-foreground">{s.label}</p>
+                                <p className="font-semibold text-sm truncate">{s.value}</p>
                             </CardContent>
                         </Card>
                     ))}
@@ -226,19 +256,26 @@ export default function IngestPage() {
                                 <Info className="h-4 w-4" />
                                 <span>Pipeline Process</span>
                             </div>
-                            <p className="opacity-90">
-                                Fetch PDF via Agent → Parse with Unstructured.io → Store in MongoDB → Embed with all-MiniLM-L6-v2 → Store in FAISS
-                            </p>
+                            <div className="flex flex-wrap gap-1 items-center opacity-90 text-xs">
+                                {PIPELINE_STEPS.map((step, i) => (
+                                    <span key={step} className="flex items-center gap-1">
+                                        <span>{step}</span>
+                                        {i < PIPELINE_STEPS.length - 1 && <ChevronRight className="h-3 w-3 opacity-50" />}
+                                    </span>
+                                ))}
+                            </div>
                         </div>
 
                         <Button
+                            id="ingest-submit-btn"
                             type="submit"
-                            disabled={loading || !gene.trim() || !drug.trim()}
+                            disabled={isActive || !gene.trim() || !drug.trim()}
                             className="w-full md:w-auto bg-primary hover:bg-primary/80 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
                         >
-                            {loading ? (
+                            {isActive ? (
                                 <span className="flex items-center gap-2">
-                                    <span className=""></span> Processing...
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Processing… ({elapsed}s)
                                 </span>
                             ) : (
                                 <span className="flex items-center gap-2">Start Ingestion</span>
@@ -248,35 +285,86 @@ export default function IngestPage() {
                 </CardContent>
             </Card>
 
-            {/* Error */}
-            {error && (
-                <Card className="border-destructive/50 bg-destructive/10">
-                    <CardContent className="pt-6">
-                        <p className="text-destructive flex items-center gap-2">
-                            <span>⚠️</span> {error}
-                        </p>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* Result */}
+            {/* ── Progress Card ── */}
             {result && (
                 <Card className="glass border-border/40 animate-in fade-in-0 slide-in-from-bottom-4 duration-500">
                     <CardHeader>
                         <div className="flex items-center justify-between">
-                            <CardTitle className="text-base">Ingestion Status</CardTitle>
+                            <CardTitle className="text-base flex items-center gap-2">
+                                {isDone  && <CheckCircle2 className="h-5 w-5 text-emerald-400" />}
+                                {isFailed && <XCircle    className="h-5 w-5 text-red-400" />}
+                                {isActive  && <Loader2   className="h-5 w-5 text-blue-400 animate-spin" />}
+                                Ingestion Status
+                            </CardTitle>
                             <Badge variant="outline" className={statusColor(result.status)}>
                                 {result.status.toUpperCase()}
                             </Badge>
                         </div>
                     </CardHeader>
-                    <CardContent>
-                        <p className="text-muted-foreground">{result.message}</p>
+                    <CardContent className="space-y-5">
+                        {/* Progress Bar */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                <span>{result.step ?? "Queued"}</span>
+                                <span>{progressPct}%</span>
+                            </div>
+                            <div className="h-2 w-full rounded-full bg-muted/40 overflow-hidden">
+                                <div
+                                    className={`h-full rounded-full transition-all duration-700 ease-out ${
+                                        isDone  ? "bg-emerald-500" :
+                                        isFailed ? "bg-red-500" :
+                                        "bg-primary"
+                                    } ${isActive && !isDone ? "animate-pulse" : ""}`}
+                                    style={{ width: `${progressPct}%` }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Step checklist */}
+                        <div className="space-y-1.5">
+                            {PIPELINE_STEPS.map((step, i) => {
+                                const done    = isDone || i < stepIndex;
+                                const active  = !isDone && i === stepIndex && isActive;
+                                const pending = !done && !active;
+                                return (
+                                    <div
+                                        key={step}
+                                        className={`flex items-center gap-2 text-xs transition-colors ${
+                                            done    ? "text-emerald-400" :
+                                            active  ? "text-primary" :
+                                            "text-muted-foreground/50"
+                                        }`}
+                                    >
+                                        {done   && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                                        {active && <Loader2      className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+                                        {pending && <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-current/30 inline-block" />}
+                                        {step}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Message */}
+                        <p className={`text-sm ${isFailed ? "text-red-400" : "text-muted-foreground"}`}>
+                            {result.message}
+                        </p>
+
                         {result.guideline_id && (
-                            <p className="text-sm text-primary mt-2">
+                            <p className="text-sm text-primary">
                                 Guideline ID: <span className="font-mono">{result.guideline_id}</span>
                             </p>
                         )}
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Error */}
+            {error && (
+                <Card className="border-destructive/50 bg-destructive/10">
+                    <CardContent className="pt-6">
+                        <p className="text-destructive flex items-center gap-2">
+                            <XCircle className="h-4 w-4" /> {error}
+                        </p>
                     </CardContent>
                 </Card>
             )}

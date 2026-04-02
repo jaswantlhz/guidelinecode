@@ -1,0 +1,25 @@
+INFO [Strategy 1] Hardcoded map hit: CYP2D6/codeine \u2192 pmid=33387367, pmcid=PMC8249478
+INFO PMC PDF (cached pmcid=PMC8249478): https://pmc.ncbi.nlm.nih.gov/articles/PMC8249478/pdf/nihms-1687629.pdf
+
+============================================================
+Testing: CYP2D6 / codeine
+============================================================
+Traceback (most recent call last):
+  File "F:\Main_files\drug_Code\guidelinecode\test_link_searcher.py", line 34, in <module>
+    print(f"\u2705  PDF URL: {pdf}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\miniconda\envs\langchain\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "F:\Main_files\drug_Code\guidelinecode\test_link_searcher.py", line 36, in <module>
+    print(f"\u274c  FAILED: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "F:\miniconda\envs\langchain\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>

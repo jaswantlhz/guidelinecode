@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Callable, List, Optional
 
 from langchain_core.documents import Document
 
@@ -29,7 +30,7 @@ from config import settings
 from services.embeddings import add_documents, get_vectorstore
 from services.mongodb import get_guideline, store_guideline
 from services.pubmed import fetch_pubmed_abstracts
-from services.unstructured_parser import parse_pdf_with_unstructured
+from services.unstructured_parser import parse_article_from_pmcid, parse_pdf_with_unstructured
 
 logger = logging.getLogger(__name__)
 
@@ -80,33 +81,63 @@ def _elements_to_documents(
     return docs
 
 
-# ─── Agent pipeline: fetch guideline PDF ─────────────────────
+# ─── Agent pipeline: fetch guideline content ─────────────────────────────
 
-def _fetch_guideline_pdf(gene: str, drug: str) -> Path | None:
-    """Run the agent tool pipeline to fetch the CPIC guideline PDF."""
+def _fetch_guideline_pdf(gene: str, drug: str) -> tuple[Path | None, list | None]:
+    """
+    Run the agent tool pipeline to fetch and parse a CPIC guideline.
+
+    Returns (pdf_path, elements) where exactly one is non-None:
+      - (Path, None)  — PDF downloaded successfully; caller parses it
+      - (None, list)  — PDF was cookie-blocked; elements from PMC XML fallback
+      - (None, None)  — complete failure
+    """
     try:
         logger.info(f"Looking up guideline URL for {gene}/{drug}...")
         page_url = get_guideline_pdf(gene=gene, drug=drug)
         logger.info(f"Found guideline page: {page_url}")
 
         logger.info(f"Searching for PDF link on {page_url}...")
-        pdf_url = search_pdf(page_url=page_url)
+        pdf_url = search_pdf(page_url=page_url, gene=gene, drug=drug)
         logger.info(f"Found PDF link: {pdf_url}")
 
         pdf_dir = str(settings.PDF_DIR)
         os.makedirs(pdf_dir, exist_ok=True)
-        logger.info(f"Downloading PDF to {pdf_dir}...")
-        pdf_path = download_pdf(pdf_url=pdf_url, gene=gene, drug=drug, folder=pdf_dir)
-        logger.info(f"Downloaded PDF: {pdf_path}")
 
-        return Path(pdf_path)
+        try:
+            logger.info(f"Downloading PDF to {pdf_dir}...")
+            pdf_path = download_pdf(pdf_url=pdf_url, gene=gene, drug=drug, folder=pdf_dir)
+            logger.info(f"Downloaded PDF: {pdf_path}")
+            return Path(pdf_path), None
+
+        except ValueError as dl_err:
+            err_str = str(dl_err)
+            # PDF URL returned HTML — try PMC XML full text instead
+            if "HTML instead of PDF" in err_str or "html" in err_str.lower():
+                pmcid_match = re.search(r'PMC\d+', pdf_url, re.I)
+                if pmcid_match:
+                    pmcid = pmcid_match.group().upper()
+                    logger.info(
+                        f"PDF blocked (HTML response). "
+                        f"Fetching full text via PMC XML: {pmcid}"
+                    )
+                    try:
+                        elements = parse_article_from_pmcid(pmcid)
+                        logger.info(
+                            f"PMC XML fallback succeeded: {len(elements)} elements"
+                        )
+                        return None, elements
+                    except Exception as xml_err:
+                        logger.warning(f"PMC XML fallback failed: {xml_err}")
+            logger.warning(f"Download failed for {gene}/{drug}: {dl_err}")
+            return None, None
 
     except ValueError as e:
         logger.warning(f"Agent pipeline error for {gene}/{drug}: {e}")
-        return None
+        return None, None
     except Exception as e:
         logger.error(f"Unexpected error in agent pipeline for {gene}/{drug}: {e}")
-        return None
+        return None, None
 
 
 # ─── Find existing PDF ────────────────────────────────────────
@@ -139,7 +170,7 @@ def _already_ingested(gene: str, drug: str) -> bool:
 
 # ─── Main ingestion entry point ───────────────────────────────
 
-def ingest_drug(gene: str, drug: str) -> dict:
+def ingest_drug(gene: str, drug: str, _progress_cb: Optional[Callable[[int, str], None]] = None) -> dict:
     """
     Ingest a drug guideline — full pipeline.
 
@@ -151,9 +182,14 @@ def ingest_drug(gene: str, drug: str) -> dict:
     6. Store JSON in MongoDB (for raw storage)
     7. Embed guideline chunks + PubMed abstracts in ChromaDB
     """
+    def _step(i: int, msg: str):
+        logger.info(msg)
+        if _progress_cb:
+            _progress_cb(i, msg)
     drug_name = drug.lower()
 
-    # ── Step 1: Check if already ingested (via ChromaDB) ──
+    # ── Step 0: Check if already ingested (via ChromaDB) ──
+    _step(0, f"Checking ChromaDB for existing {gene}/{drug} index…")
     if _already_ingested(gene, drug_name):
         logger.info(f"Guideline for {gene}/{drug_name} already exists in ChromaDB")
         return {
@@ -162,62 +198,111 @@ def ingest_drug(gene: str, drug: str) -> dict:
             "guideline_id": f"{gene}_{drug_name}",
         }
 
-    # ── Step 2: Find or fetch the PDF ──
+    # ── Step 1: Locate PDF ──
+    _step(1, f"Locating guideline PDF for {gene}/{drug_name}…")
     pdf_path = _find_pdf(drug_name)
+    elements = None
 
     if pdf_path is None:
-        logger.info(f"No existing PDF for {drug_name}. Running agent pipeline...")
-        pdf_path = _fetch_guideline_pdf(gene=gene, drug=drug_name)
+        _step(2, f"No local PDF found. Running agent pipeline to download…")
+        pdf_path, elements = _fetch_guideline_pdf(gene=gene, drug=drug_name)
+    else:
+        _step(2, f"Found existing PDF: {pdf_path.name}")
 
-    if pdf_path is None:
+    if pdf_path is None and elements is None:
         return {
             "status": "failed",
             "message": (
                 f"Could not find or fetch a guideline PDF for '{gene}/{drug_name}'. "
-                f"The gene-drug pair may not exist in the CPIC database."
+                f"The gene-drug pair may not exist in the CPIC database or is paywalled."
             ),
         }
 
-    # ── Step 3: Parse with Unstructured.io API ──
-    logger.info(f"Parsing '{pdf_path.name}' with Unstructured.io API...")
-    try:
-        elements = parse_pdf_with_unstructured(pdf_path)
-    except Exception as e:
-        logger.error(f"Unstructured API failed: {e}")
-        return {
-            "status": "failed",
-            "message": f"Unstructured.io API failed to parse '{pdf_path.name}': {e}",
-        }
+    # ── Step 3: Parse with pypdf (local, fast) ──
+    if elements is not None:
+        _step(3, f"Using pre-extracted elements from XML fallback…")
+        pdf_name = f"{gene}_{drug_name}_XML"
+    else:
+        pdf_name = pdf_path.name
+        _step(3, f"Parsing '{pdf_name}' with local PDF parser…")
+        try:
+            elements = parse_pdf_with_unstructured(pdf_path)
+        except ValueError as e:
+            err_msg = str(e)
+            # Corrupt/invalid PDF cached from a previous failed download?
+            if "not a valid PDF" in err_msg or "is not a real PDF" in err_msg or "could not read" in err_msg:
+                logger.warning(f"Corrupt cached PDF detected: {err_msg}")
+                logger.info(f"Deleting '{pdf_path}' and retrying download...")
+                try:
+                    pdf_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                _step(3, f"Re-downloading PDF for {gene}/{drug_name}…")
+                pdf_path, elements = _fetch_guideline_pdf(gene=gene, drug=drug_name)
+                
+                if pdf_path is None and elements is None:
+                    return {
+                        "status": "failed",
+                        "message": (
+                            f"Cached PDF was invalid and re-download also failed "
+                            f"for '{gene}/{drug_name}'."
+                        ),
+                    }
+                
+                if elements is None:
+                    _step(3, f"Re-parsing '{pdf_path.name}'…")
+                    try:
+                        elements = parse_pdf_with_unstructured(pdf_path)
+                    except Exception as retry_err:
+                        return {
+                            "status": "failed",
+                            "message": f"PDF parsing failed after re-download: {retry_err}",
+                        }
+                else:
+                    _step(3, f"Using pre-extracted elements from XML fallback after re-download…")
+                    pdf_name = f"{gene}_{drug_name}_XML"
+            else:
+                return {
+                    "status": "failed",
+                    "message": f"PDF parsing failed: {err_msg}",
+                }
+        except Exception as e:
+            logger.error(f"PDF parsing error: {e}")
+            return {
+                "status": "failed",
+                "message": f"PDF parsing failed for '{pdf_name}': {e}",
+            }
 
     if not elements:
         return {
             "status": "failed",
-            "message": f"Unstructured.io returned no elements for '{pdf_path.name}'.",
+            "message": f"Unstructured.io returned no elements for '{pdf_name}'.",
         }
 
-    # ── Step 4: Convert PDF elements to Documents ──
+    # ── Step 4: Convert to Documents ──
     pdf_docs = _elements_to_documents(elements, gene=gene, drug=drug_name)
     if not pdf_docs:
         return {
             "status": "failed",
-            "message": f"No meaningful text extracted from '{pdf_path.name}'.",
+            "message": f"No meaningful text extracted from '{pdf_name}'.",
         }
 
-    # ── Step 5: Fetch PubMed abstracts ──
-    logger.info(f"Fetching PubMed abstracts for {gene}/{drug_name}...")
+    # ── Step 4 (cont): Fetch PubMed ──
+    _step(4, f"Fetching PubMed abstracts for {gene}/{drug_name}…")
     pubmed_docs = fetch_pubmed_abstracts(gene=gene, drug=drug_name, max_results=20)
     logger.info(f"Retrieved {len(pubmed_docs)} PubMed abstracts.")
 
     # Combine all documents for embedding
     all_docs = pdf_docs + pubmed_docs
 
-    # ── Step 6: Store in MongoDB (raw elements) ──
+    # ── Step 5: Store in MongoDB ──
+    _step(5, f"Storing guideline metadata in MongoDB…")
     try:
         guideline_id = store_guideline(
             gene=gene,
             drug=drug_name,
-            title=pdf_path.stem,
-            pdf_path=str(pdf_path),
+            title=pdf_path.stem if pdf_path else pdf_name,
+            pdf_path=str(pdf_path) if pdf_path else pdf_name,
             chunks_count=len(all_docs),
             unstructured_elements=elements,
         )
@@ -227,14 +312,15 @@ def ingest_drug(gene: str, drug: str) -> dict:
         logger.warning(f"MongoDB storage failed (non-critical): {e}")
         guideline_id = f"{gene}_{drug_name}"
 
-    # ── Step 7: Embed in ChromaDB ──
+    # ── Step 6: Embed in ChromaDB ──
+    _step(6, f"Embedding {len(all_docs)} chunks in ChromaDB…")
     chunks_added = add_documents(all_docs)
     logger.info(f"Embedded {chunks_added} chunks in ChromaDB ({len(pdf_docs)} guideline + {len(pubmed_docs)} PubMed)")
 
     return {
         "status": "completed",
         "message": (
-            f"Successfully ingested '{pdf_path.name}': "
+            f"Successfully ingested '{pdf_name}': "
             f"{len(pdf_docs)} guideline chunks + {len(pubmed_docs)} PubMed abstracts "
             f"({chunks_added} total embedded)."
         ),

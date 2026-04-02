@@ -3,14 +3,16 @@
 REFACTORED: Ingestion now runs as a BackgroundTask (async).
 - POST /api/ingest returns 202 Accepted immediately with a task ID
 - The actual Unstructured.io parsing + embedding runs in the background
-- Poll GET /api/ingest/options for the gene-drug catalog
+- Poll GET /api/ingest/job/<job_id> to get status + progress
 """
 
+import asyncio
 import uuid
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from models.schemas import IngestRequest, IngestResponse
 from services.ingestion import ingest_drug
 
@@ -21,13 +23,42 @@ router = APIRouter(prefix="/api", tags=["ingest"])
 # In-memory job store (sufficient for single-server dev; use Redis in production)
 _jobs: Dict[str, dict] = {}
 
+# Thread pool for running sync ingestion without blocking the async event loop
+_executor = ThreadPoolExecutor(max_workers=2)
+
+
+# Pipeline step labels for progress tracking
+_STEPS = [
+    "Checking existing index",
+    "Locating guideline PDF",
+    "Downloading PDF",
+    "Parsing with Unstructured.io",
+    "Fetching PubMed abstracts",
+    "Storing in MongoDB",
+    "Embedding in ChromaDB",
+    "Done",
+]
+
+
+def _progress(job_id: str, step_index: int, message: str) -> None:
+    """Update the job's progress fields."""
+    _jobs[job_id]["step"] = _STEPS[step_index]
+    _jobs[job_id]["step_index"] = step_index
+    _jobs[job_id]["total_steps"] = len(_STEPS) - 1  # exclude 'Done'
+    _jobs[job_id]["message"] = message
+
 
 def _run_ingest_job(job_id: str, gene: str, drug: str) -> None:
-    """Background worker — runs ingest_drug and stores result in _jobs."""
+    """
+    Background worker — runs ingest_drug with granular step tracking.
+    Runs in a thread pool to avoid blocking the async event loop.
+    """
     try:
         _jobs[job_id]["status"] = "running"
-        result = ingest_drug(gene=gene, drug=drug)
+        _progress(job_id, 0, f"Checking if {gene}/{drug} is already indexed…")
+        result = ingest_drug(gene=gene, drug=drug, _progress_cb=lambda i, m: _progress(job_id, i, m))
         _jobs[job_id].update(result)
+        _progress(job_id, len(_STEPS) - 1, result.get("message", "Done"))
     except Exception as e:
         logger.error(f"Background ingest job {job_id} failed: {e}")
         _jobs[job_id]["status"] = "failed"
@@ -35,24 +66,37 @@ def _run_ingest_job(job_id: str, gene: str, drug: str) -> None:
 
 
 @router.post("/ingest", status_code=202)
-async def post_ingest(req: IngestRequest, background_tasks: BackgroundTasks):
+async def post_ingest(req: IngestRequest):
     """
     Start a guideline ingestion job asynchronously.
 
-    Returns 202 Accepted immediately. The ingestion pipeline runs in the
-    background. Use GET /api/ingest/status?gene=...&drug=... to poll.
+    Returns 202 Accepted immediately. The ingestion pipeline runs in a
+    thread pool executor so the async event loop is never blocked.
+    Use GET /api/ingest/job/<job_id> to poll progress.
     """
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
+        "job_id": job_id,
         "status": "pending",
-        "message": f"Ingestion started for {req.gene}/{req.drug}",
+        "message": f"Queued ingestion for {req.gene}/{req.drug}",
         "guideline_id": None,
+        "step": "Queued",
+        "step_index": 0,
+        "total_steps": len(_STEPS) - 1,
     }
 
-    background_tasks.add_task(_run_ingest_job, job_id, req.gene, req.drug)
-    logger.info(f"Ingestion job {job_id} queued for {req.gene}/{req.drug}")
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(_executor, _run_ingest_job, job_id, req.gene, req.drug)
+    logger.info(f"Ingestion job {job_id} dispatched to thread pool for {req.gene}/{req.drug}")
 
-    return {"status": "pending", "message": f"Ingestion started for {req.gene}/{req.drug}", "job_id": job_id}
+    return {
+        "status": "pending",
+        "message": f"Queued ingestion for {req.gene}/{req.drug}",
+        "job_id": job_id,
+        "step": "Queued",
+        "step_index": 0,
+        "total_steps": len(_STEPS) - 1,
+    }
 
 
 @router.get("/ingest/job/{job_id}")
