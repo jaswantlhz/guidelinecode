@@ -1,0 +1,18 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+  backend:
+    build:
+      context: .
+      dockerfile: backend/dockerfile
+    ports:
+      - '8000:8000'
+    environment:
+      # host.docker.internal allows the container to connect to localhost on your machine
+      - MONGODB_URI=mongodb://host.docker.internal:27017
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

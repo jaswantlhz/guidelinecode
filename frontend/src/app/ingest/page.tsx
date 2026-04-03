@@ -139,10 +139,10 @@ export default function IngestPage() {
     const isFailed = result?.status === "failed";
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700 ease-out">
             {/* Header */}
-            <section className="space-y-2">
-                <h1 className="text-3xl font-bold">
+            <section className="space-y-2 animate-in zoom-in-95 duration-1000">
+                <h1 className="text-3xl font-bold tracking-tight text-black">
                     <span className="gradient-text">Guideline Ingestion</span>
                 </h1>
                 <p className="text-muted-foreground">

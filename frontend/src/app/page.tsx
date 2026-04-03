@@ -145,12 +145,11 @@ export default function QueryPage() {
     };
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700 ease-out">
             {/* Hero */}
-            <section className="text-center space-y-4 py-8">
-                <h1 className="text-4xl md:text-5xl font-bold">
-                    <span className="gradient-text">Pharmacogenomics</span>{" "}
-                    <span className="text-foreground">Intelligence</span>
+            <section className="text-center space-y-4 py-8 animate-in zoom-in-95 duration-1000">
+                <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-black">
+                    <span className="gradient-text animate-pulse-glow">Pharmacogenomics</span> Intelligence
                 </h1>
                 <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
                     Ask clinical questions about CPIC guidelines. Our RAG-powered AI retrieves
@@ -159,7 +158,7 @@ export default function QueryPage() {
             </section>
 
             {/* Query Form */}
-            <Card className="glass border-border/40 animate-pulse-glow">
+            <Card className="glass border-border/40 ">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                         Ask a Question

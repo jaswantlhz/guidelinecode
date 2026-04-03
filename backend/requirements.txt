@@ -14,3 +14,4 @@ openpyxl
 python-multipart
 unstructured-client
 biopython
+pymongo

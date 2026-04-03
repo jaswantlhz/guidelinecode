@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # LLM — upgraded to gpt-4o-mini (cheap, reliable, high quality)
     LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-oss-20b:free")
     LLM_TEMPERATURE: float = 0.1
-    LLM_MAX_TOKENS: int = 4096
+    LLM_MAX_TOKENS: int = 10096
 
     class Config:
         env_file = str(_env_path)
