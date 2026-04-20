@@ -1,0 +1,9 @@
+### 1. Direct Answer  
+For patients with pathogenic CACNA1S variants (i.e., malignant hyperthermia‑susceptible individuals), halothane should **not be used**; if it must be administered, it should be done only in extraordinary circumstances where the benefits clearly outweigh the risks, and alternative anesthetics should be preferred.  
+
+### 2. Supporting Evidence  
+- “Individuals are at increased risk of developing malignant hyperthermia if administered halogenated volatile anesthetics or the depolarizing muscle relaxant succinylcholine”【Source 1】.  
+- “Halogenated volatile anesthetics or depolarizing muscle relaxants succinylcholine are relatively contraindicated in persons with MHS. They should not be used, except in extraordinary circumstances in which the benefits outweigh the risks”【Source 1】.  
+
+### 3. Confidence Level  
+**0.95** – The context explicitly states the contraindication and the conditional use for halogenated volatile anesthetics, which includes halothane.
