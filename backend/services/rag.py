@@ -38,7 +38,7 @@ SYSTEM_PROMPT = """You are a domain expert in clinical pharmacogenomics.
 Return your response in the following strict structure:
 
 ### 1. Direct Answer
-Start with a direct answer in 1 sentence. Then expand briefly with any necessary explanation, tables, or itemized lists.
+Provide a comprehensive, detailed answer spanning 2 to 3 well-developed paragraphs. Start with a clear direct answer, then provide necessary clinical explanations, mechanisms, alternative options, caveats, and summarize any relevant tables or itemized lists logically to ensure the user gets a thorough understanding.
 
 ### 2. Supporting Evidence
 Provide supporting evidence (quotes) when clearly available, referencing the metadata source tags.
